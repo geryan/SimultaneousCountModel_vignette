@@ -1,17 +1,24 @@
 ---
 title: "Simultaneous count model vignette"
-output: html_notebook
+author: "G.E. Ryan"
+date: '2019-10-25'
+output:
+  html_document:
+    df_print: paged
 ---
 
+This is a vignette illustrating the "simultaneous count model" approach from [*Simultaneous‐count models to estimate abundance from counts of unmarked individuals with imperfect detection*, Conservation Biology 33(3) 697—708, G.E. Ryan et al. 2019.]( https://doi.org/10.1111/cobi.13261)
 
 ## Packages
-```{r packages}
+```{r packages, result='hide'}
 library(dplyr)
 library(rjags)
 library(R2jags)
 library(jagstools)
+library(ggplot2)
+library(bayesplot)
 ```
-If necessary install `jagstools with:
+If necessary install `jagstools` from [github](https://github.com/johnbaums/jagstools) with:
 
 `library(remotes)`
 
@@ -24,40 +31,59 @@ Create a dataset simulating population of 1000 individuals,
 A survey effort at:
  - 5 sites,
  - visited 4 times/year,
- - for 5 years, where only,
+ - for 5 years
  
-Around half of the population is ever observed at each site in a single sampling occasion (visit), and
+Around half of the population is ever observed at each site in a single sampling occasion (visit).
 
 Probabilities of detection are constant at each site over time.
+
+### Simulated data
 ```{r dat}
+
+# population size
+population.size <- 1000
+
+# site probabilities of detection [1:5], and probability of non-detection [6]
+probs <- c(0.01, 0.15, 0.04, 0.22, 0.08, 0.5)
+
 dat <- array(
   data = rmultinom(
-    n = 20,
-    size = 1000, # population size
-    c(0.01, 0.15, 0.04, 0.22, 0.08, 0.5) # site probabilities of detection (1:5), and probability of non-detection (6)
+    n = 20, # 4 visits x 5 years
+    size = population.size,
+    prob = probs 
   ),
   dim = c(6,4,5), # sites +1, visits/year, years
   dimnames = list(
-    site = sprintf("site%s", 1:6),
+    "site" = sprintf("site%s", 1:6),
     "visit" = sprintf("visit%s", 1:4),
     "year" = sprintf("year%s", 1:5)
   )
 )
+```
+Let's look at the first two years of data:
+```{r dat[,,1:2]}
+dat[,,1:2]
+```
+We can see that this simulates six sites, because while we visit five sites, this simulated sixth site represents the population that we have not observed,
 
-dat
+### Model data
+To model the observation process, we won't observe the inddividuals at site six, so we record these in the array as `NA`. We'll use `y` for these data simulated observation data to be consistent with the notation in Ryan *et al*.
+```{r y}
+y <- dat
+
+y[6,,] <- NA
+```
+Let's have a look at the first two years of these data
+```{r y[,,1:2]}
+y[,,1:2]
 ```
 
-But we don't observe the population at "site6" because this represents the unobserved proportion of the population
-```{r obsdat}
-obsdat <- dat
 
-obsdat[6,,] <- NA
 
-obsdat
-```
+## Modelling
 
-## Write model
-JAGS model.
+### Write our JAGS model.
+This model
 For explanation of ones trick see: https://www.mrc-bsu.cam.ac.uk/wp-content/uploads/manual14.pdf
 ```{r jags.mod}
 cat('
@@ -65,29 +91,34 @@ cat('
     for (j in 1:nvisits){
       for (k in 1:nyears){
         ones[j,k] <- 1
+        # constants for ones trick
       }
     }
     C <- 10000
+    # constant for ones trick
   }
   model{
-#Priors for lambda and pi - alpha specified as vector of 1s
-    lambda ~ dgamma(1e-5, 1e-5)#T(1,5000) # Lambda prior drawn from gamma distribution, truncated at 5000 to improve model convergence time
+    lambda ~ dgamma(1e-5, 1e-5)T(1,5000)
+    # Hyper-prior for population size, truncated at 5000 to improve convergence
     
     N ~ dpois(lambda)
+    # Prior estimate of population size
     
     pi[1:(nsites + 1)] ~ ddirich(alpha[1:(nsites + 1)])
-
+    # Prior for our observation process
+    
     for (k in 1:nyears){
       for (j in 1:nvisits){
         
-        seen[j,k] <- sum(obsdat[1:nsites,j,k]) # observations
-        obsdat[nsites + 1,j,k] <- N - seen[j,k]
+        seen[j,k] <- sum(y[1:nsites,j,k]) # Number of individuals observed
+        y[(nsites + 1),j,k] <- N - seen[j,k] # complete our array y
         
-#Likelihood
-        for (i in 1:nsites){
-          lp[i,j,k] <- obsdat[i,j,k]*log(pi[i]) - logfact(obsdat[i,j,k]) #log product
+        # Likelihood written in full
+        # because we cant simply do y ~ multinomial with missing data in JAGS
+        for (i in 1:(nsites + 1)){
+          lp[i,j,k] <- y[i,j,k]*log(pi[i]) - logfact(y[i,j,k])
         }
-        lnL[j,k] <- sum(lp[1:nsites,j,k]) + logfact(N) #log likelihood
+        lnL[j,k] <- sum(lp[1:(nsites + 1),j,k]) + logfact(N)
         log(P[j,k]) <- lnL[j,k] - log(C)
         ones[j,k] ~ dbern(P[j,k]) # ones trick
       }
@@ -97,11 +128,11 @@ cat('
     , file = (jags.mod <- tempfile())) # This writes a temporary file with the model and assigns the path at jags.mod
 ```
 
-## Prepare data
+### Prepare data for JAGS
 ```{r jags.data}
-nsites   <- dim(obsdat)[1] - 1 # should be 5
-nvisits  <- dim(obsdat)[2]     # should be 4
-nyears   <- dim(obsdat)[3]     # should be 5
+nsites   <- dim(y)[1] - 1 # should be 5
+nvisits  <- dim(y)[2]     # should be 4
+nyears   <- dim(y)[3]     # should be 5
   
 alpha <- rep(1, (nsites + 1))
   
@@ -109,37 +140,155 @@ jags.params <- c("N", "pi", "lambda")
 
 jags.inits <- function(){
   list(
-    lambda = 5*sum(obsdat[,1,1], na.rm = TRUE) # initial value to search from is 5x the total observed in the first sampling occasion
+    lambda = 2*sum(y[,1,1], na.rm = TRUE) # initial value to search from is 5x the total observed in the first sampling occasion
   )
 }
 
 jags.data <- list(
-  "obsdat",
+  "y",
   "nsites",
   "nvisits",
   "nyears",
   "alpha"
 )
 
-
-  
-  assign("obsdat",     obsdat,     envir=globalenv())
-  assign("alpha",      alpha,      envir=globalenv())
-  assign("nsites",     nsites,     envir=globalenv())
-  assign("nreps",      nreps,      envir=globalenv())
-  assign("nyears",     nyears,     envir=globalenv())
-  assign("jags.inits", jags.inits, envir=globalenv())
+assign("y",       y,       envir=globalenv())
+assign("alpha",   alpha,   envir=globalenv())
+assign("nsites",  nsites,  envir=globalenv())
+assign("nvisits", nvisits, envir=globalenv())
+assign("nyears",  nyears,  envir=globalenv())
 ```
 
-```{r}
+### Fit our model
+This is a short-run test fit, with just 5000 iterations.
+```{r jags.fit, results='hide'}
 jags.fit <- jags(
   data = jags.data,
   inits = jags.inits,
   parameters.to.save = jags.params,
-  n.iter = 1000,
-  n.burnin = 500,
+  n.iter = 5000,
+  n.burnin = 100,
   n.chains = 3,
   model.file = jags.mod
 )
 ```
 
+```{r print jags.fit, echo=FALSE}
+jags.fit
+```
+The high R-hat values suggest the model is not converged.
+
+Let's also check the traceplots.
+```{r trace}
+color_scheme_set(scheme = "viridis")
+mcmc_trace(x = jags.fit$BUGSoutput$sims.array)
+```
+These are clearly not converged.
+
+Let's try fitting with a much longer run and burn-in. Generally this might be done iteratively, but let's go straight to 300k iterations with 100k burn-in.
+
+We also use `jags.parallel` here to fit chains in parallel.
+```{r jags.fit parallel, results='hide'}
+jags.fit <- do.call(
+  what = jags.parallel,
+  args = list(
+    data = jags.data,
+  inits = jags.inits,
+  parameters.to.save = jags.params,
+  n.iter = 300000,
+  n.burnin = 100000,
+  n.chains = 3,
+  n.thin = 100,
+  model.file = jags.mod
+  )
+)
+```
+
+```{r print jags.fit parallel, echo=FALSE}
+jags.fit
+```
+These R-hat values are much better (<1.1).
+
+Let's also see some traceplots.
+```{r trace parallel}
+mcmc_trace(x = jags.fit$BUGSoutput$sims.array)
+```
+Showing a lot of autocorrelation, but appear to be converged.
+
+## Results
+
+Let's have a look at our results.
+
+Yellow points represent the posterior median, dark purple bands the 50% credible interval, and light blue bands the 95% credible interval.
+
+Our estimates of *pi*:
+```{r mcmc_intervals pi}
+mcmc_intervals(
+  x = jags.fit$BUGSoutput$sims.array,
+  pars = sprintf("pi[%s]", 1:6),
+  prob_outer = 0.95
+)
+```
+
+And of *N*:
+```{r mcmc_intervals N}
+mcmc_intervals(
+  x =jags.fit$BUGSoutput$sims.array,
+  pars = "N",
+  prob_outer = 0.95
+) +
+  scale_x_continuous(limits = c(0, NA))
+```
+
+And let's compare these directly with our true values. Here the red box and cross represent our true value, plotted over our posterior estimates.
+
+*Pi*:
+```{r mcmc_intervals pi true}
+true.pi <- data.frame(
+  x = probs,
+  y = sprintf("pi[%s]", 1:6)
+)
+
+mcmc_intervals(
+  x = jags.fit$BUGSoutput$sims.array,
+  pars = sprintf("pi[%s]", 1:6),
+  prob_outer = 0.95
+) +
+  geom_point(
+    data = true.pi,
+    aes(
+      x = x,
+      y = y
+    ),
+    shape = 7,
+    col = "red",
+    size = 5
+  )
+```
+Lookds pretty good!
+
+And of *N*:
+```{r mcmc_intervals N true}
+true.N <- data.frame(
+  x = population.size,
+  y = "N"
+)
+
+mcmc_intervals(
+  x =jags.fit$BUGSoutput$sims.array,
+  pars = "N",
+  prob_outer = 0.95
+) +
+  scale_x_continuous(limits = c(0, NA)) +
+  geom_point(
+    data = true.N,
+    aes(
+      x = x,
+      y = y
+    ),
+    shape = 7,
+    col = "red",
+    size = 5
+  )
+```
+Not too bad.
