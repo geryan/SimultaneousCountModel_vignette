@@ -2,15 +2,13 @@
 title: "Simultaneous count model vignette"
 author: "G.E. Ryan"
 date: '2019-10-25'
-output:
-  html_document:
-    df_print: paged
+output: html_notebook
 ---
 
 This is a vignette illustrating the "simultaneous count model" approach from [*Simultaneous‐count models to estimate abundance from counts of unmarked individuals with imperfect detection*, Conservation Biology 33(3) 697—708, G.E. Ryan et al. 2019.]( https://doi.org/10.1111/cobi.13261)
 
 ## Packages
-```{r packages, result='hide'}
+```{r packages, result='hide', warning = FALSE, message = FALSE}
 library(dplyr)
 library(rjags)
 library(R2jags)
@@ -29,6 +27,7 @@ If necessary install `jagstools` from [github](https://github.com/johnbaums/jags
 Create a dataset simulating population of 1000 individuals,
 
 A survey effort at:
+
  - 5 sites,
  - visited 4 times/year,
  - for 5 years
@@ -62,7 +61,7 @@ dat <- array(
 ```
 Let's look at the first two years of data:
 ```{r dat[,,1:2]}
-dat[,,1:2]
+print(dat[,,1:2])
 ```
 We can see that this simulates six sites, because while we visit five sites, this simulated sixth site represents the population that we have not observed,
 
@@ -75,7 +74,7 @@ y[6,,] <- NA
 ```
 Let's have a look at the first two years of these data
 ```{r y[,,1:2]}
-y[,,1:2]
+print(y[,,1:2])
 ```
 
 
@@ -161,20 +160,20 @@ assign("nyears",  nyears,  envir=globalenv())
 
 ### Fit our model
 This is a short-run test fit, with just 5000 iterations.
-```{r jags.fit, results='hide'}
-jags.fit <- jags(
-  data = jags.data,
-  inits = jags.inits,
-  parameters.to.save = jags.params,
-  n.iter = 5000,
-  n.burnin = 100,
-  n.chains = 3,
-  model.file = jags.mod
-)
+```{r jags.fit, results = 'hide', warning = FALSE, message = FALSE}
+# jags.fit <- jags(
+#   data = jags.data,
+#   inits = jags.inits,
+#   parameters.to.save = jags.params,
+#   n.iter = 5000,
+#   n.burnin = 100,
+#   n.chains = 3,
+#   model.file = jags.mod
+# )
 ```
 
 ```{r print jags.fit, echo=FALSE}
-jags.fit
+# jags.fit
 ```
 The high R-hat values suggest the model is not converged.
 
@@ -188,7 +187,7 @@ These are clearly not converged.
 Let's try fitting with a much longer run and burn-in. Generally this might be done iteratively, but let's go straight to 300k iterations with 100k burn-in.
 
 We also use `jags.parallel` here to fit chains in parallel.
-```{r jags.fit parallel, results='hide'}
+```{r jags.fit parallel, results = 'hide', warning = FALSE, message = FALSE}
 jags.fit <- do.call(
   what = jags.parallel,
   args = list(
