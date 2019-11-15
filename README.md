@@ -2,7 +2,7 @@
 
 This repository contains a vignette illustrating the "simultaneous count model" approach from [*Simultaneous‐count models to estimate abundance from counts of unmarked individuals with imperfect detection*, Conservation Biology 33(3) 697—708, G.E. Ryan et al. 2019.]( https://doi.org/10.1111/cobi.13261)
 
-A [pdf of the vignette](https://github.com/geryan/SimultaneousCountModel_vignette/blob/master/simultaneous_count_model_vignette.pdf) illustrates the model and shows the results output. Best downloaded to view.
+A [pdf of the vignette](https://github.com/geryan/SimultaneousCountModel_vignette/blob/master/simultaneous_count_model_vignette.pdf) illustrates the model and shows the results output. Best downloaded to view. (More on R-markdown files [here](https://rmarkdown.rstudio.com).)
 
 To run through the analysis yourself, use the [R-markdown file `scm_vignette.Rmd`](https://github.com/geryan/SimultaneousCountModel_vignette/blob/master/scm_vignette.Rmd). you must use RStudio with the R-markdown file.
 
